@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TidyTab Options</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <header class="hero">
+        <div class="brand">
+          <img src="assets/tidytab-mark.svg" alt="" width="42" height="42">
+          <span>TidyTab</span>
+        </div>
+        <div class="hero-copy">
+          <h1>Make every window feel organized.</h1>
+          <p>Choose a simple preset or tune the AI context, provider, and privacy controls that shape each sort.</p>
+        </div>
+      </header>
+
+      <section class="surface">
+        <h2>Simple</h2>
+        <div class="preset-grid" role="radiogroup" aria-label="Sorting preset">
+          <label class="preset-card">
+            <input type="radio" name="preset" value="max">
+            <span>
+              <strong>Max accuracy</strong>
+              <span>Cloud AI, page snippets, and history trace context for the best personalized grouping.</span>
+            </span>
+          </label>
+          <label class="preset-card">
+            <input type="radio" name="preset" value="local">
+            <span>
+              <strong>Local Chrome Nano</strong>
+              <span>On-device sorting with Chrome Built-in AI and a smaller context budget.</span>
+            </span>
+          </label>
+        </div>
+      </section>
+
+      <details open>
+        <summary>Advanced</summary>
+
+      <section class="surface">
+        <h2>Provider</h2>
+        <label>
+          API provider
+          <select id="provider">
+            <option value="openai">OpenAI Responses API</option>
+            <option value="compatible">OpenAI-compatible endpoint</option>
+            <option value="vertex">Google Vertex AI</option>
+            <option value="gemini">Google Gemini API key</option>
+            <option value="chromeBuiltIn">Chrome Built-in AI (Gemini Nano)</option>
+          </select>
+        </label>
+
+        <div class="provider-panel" data-provider-panel="openai">
+          <label>OpenAI API key <input id="openaiApiKey" type="password" autocomplete="off"></label>
+          <label>Model <input id="openaiModel" type="text"></label>
+        </div>
+
+        <div class="provider-panel" data-provider-panel="compatible">
+          <label>Base URL <input id="compatibleBaseUrl" type="url" placeholder="https://api.example.com/v1"></label>
+          <label>API key <input id="compatibleApiKey" type="password" autocomplete="off"></label>
+          <label>Model <input id="compatibleModel" type="text"></label>
+        </div>
+
+        <div class="provider-panel" data-provider-panel="vertex">
+          <label>Project ID <input id="vertexProjectId" type="text"></label>
+          <label>Location <input id="vertexLocation" type="text"></label>
+          <label>Model <input id="vertexModel" type="text"></label>
+          <label>Access token <input id="vertexAccessToken" type="password" autocomplete="off"></label>
+        </div>
+
+        <div class="provider-panel" data-provider-panel="gemini">
+          <label>Gemini API key <input id="geminiApiKey" type="password" autocomplete="off"></label>
+          <label>Model <input id="geminiModel" type="text"></label>
+        </div>
+
+        <div class="provider-panel" data-provider-panel="chromeBuiltIn">
+          <p class="notice">Runs locally with Chrome Built-in AI and Gemini Nano. Requires Chrome 138+ on supported desktop hardware, enough free storage, and a first-time model download.</p>
+          <button id="availabilityButton" type="button" class="secondary">Check availability</button>
+        </div>
+      </section>
+
+      <section class="surface">
+        <h2>Context</h2>
+        <label>
+          Default sort mode
+          <select id="sortMode">
+            <option value="title">Title Sort</option>
+            <option value="smart">Smart AI Sort</option>
+            <option value="agentic">Agentic Sort</option>
+          </select>
+        </label>
+        <label>
+          Default context mode
+          <select id="contextMode">
+            <option value="metadata">Title + URL</option>
+            <option value="page">Page snippets</option>
+          </select>
+        </label>
+        <label>
+          Max snippet length
+          <input id="maxSnippetLength" type="number" min="300" max="4000" step="100">
+        </label>
+        <label class="checkbox">
+          <input id="historyContextEnabled" type="checkbox">
+          Include browser history in AI sorting
+        </label>
+        <label>
+          History lookback hours
+          <input id="historyLookbackHours" type="number" min="1" max="168" step="1">
+        </label>
+        <label>
+          Max visits per tab
+          <input id="historyMaxVisitsPerTab" type="number" min="1" max="25" step="1">
+        </label>
+        <label>
+          Nearby history entries
+          <input id="historyNearbyLimit" type="number" min="0" max="50" step="1">
+        </label>
+        <p class="notice">API keys are stored in Chrome extension local storage. This is convenient for local use, but it is not a secure secret vault.</p>
+        <p class="notice">History context is optional. If enabled, Chrome will ask for history access, and recent history details may be sent to the selected AI provider during AI sorting.</p>
+      </section>
+
+      </details>
+
+      <footer class="action-bar">
+        <button id="saveButton" type="button">Save</button>
+        <button id="testButton" type="button" class="secondary">Test provider</button>
+        <button id="resetButton" type="button" class="danger">Reset</button>
+      </footer>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </main>
+
+    <script src="options.js" type="module"></script>
+  </body>
+</html>

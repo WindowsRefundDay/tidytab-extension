@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TidyTab</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header class="hero">
+        <div class="brand">
+          <img src="assets/tidytab-mark.svg" alt="" width="36" height="36">
+          <div>
+            <h1>TidyTab</h1>
+            <p>AI tab control</p>
+          </div>
+        </div>
+        <p id="tabCount" class="tab-count">Loading tabs...</p>
+      </header>
+
+      <section class="control-panel" aria-label="Sort controls">
+        <label>
+          <span>Sort mode</span>
+          <select id="mode">
+            <option value="title">Title Sort</option>
+            <option value="smart">Smart AI Sort</option>
+            <option value="agentic">Agentic Sort</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Context</span>
+          <select id="contextMode">
+            <option value="metadata">Title + URL</option>
+            <option value="page">Page snippets</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="actions" aria-label="Actions">
+        <button id="sortButton" type="button">Sort current window</button>
+        <div class="secondary-actions">
+          <button id="undoButton" type="button" class="secondary">Undo</button>
+          <button id="optionsButton" type="button" class="secondary">Options</button>
+        </div>
+      </section>
+
+      <section id="status" class="status" role="status" aria-live="polite"></section>
+      <section class="activity" aria-label="Processing trace">
+        <div class="activity-header">
+          <h2>Processing trace</h2>
+          <button id="clearLogButton" type="button" class="link-button">Clear</button>
+        </div>
+        <ol id="activityLog" class="activity-log"></ol>
+      </section>
+    </main>
+
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

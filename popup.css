@@ -1,0 +1,242 @@
+:root {
+  color-scheme: dark;
+  font-family: Roboto, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  font-synthesis: none;
+  --bg: #070b12;
+  --surface: rgb(17 24 39 / 82%);
+  --surface-soft: rgb(30 41 59 / 70%);
+  --surface-strong: #0f172a;
+  --text: #f8fafc;
+  --muted: #a7b0c1;
+  --line: rgb(226 232 240 / 13%);
+  --primary: #f8fafc;
+  --primary-hover: #e2e8f0;
+  --accent: #60a5fa;
+  --success: #5eead4;
+  --danger: #fca5a5;
+  --shadow: 0 22px 54px rgb(0 0 0 / 34%);
+}
+
+body {
+  width: 380px;
+  margin: 0;
+  background:
+    radial-gradient(circle at 12% 0%, rgb(37 99 235 / 18%), transparent 32%),
+    radial-gradient(circle at 96% 18%, rgb(20 184 166 / 10%), transparent 30%),
+    linear-gradient(145deg, #0f172a 0%, var(--bg) 100%);
+  color: var(--text);
+}
+
+.popup {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  overflow-x: hidden;
+}
+
+.hero {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand img {
+  display: block;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgb(79 70 229 / 22%);
+}
+
+h1 {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1;
+  letter-spacing: 0;
+  font-weight: 700;
+}
+
+p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.tab-count {
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgb(17 24 39 / 5%);
+  color: #d8dee9;
+  font-weight: 500;
+}
+
+.control-panel,
+.actions,
+.activity {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px;
+  background: var(--surface-soft);
+  backdrop-filter: blur(16px);
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+select,
+button {
+  min-height: 42px;
+  border-radius: 12px;
+  font: inherit;
+}
+
+select {
+  border: 1px solid var(--line);
+  padding: 0 34px 0 12px;
+  background: var(--surface-strong);
+  color: var(--text);
+  font-weight: 500;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 70%);
+}
+
+button {
+  border: 0;
+  padding: 0 14px;
+  background: var(--primary);
+  color: #0f172a;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  box-shadow: 0 14px 28px rgb(17 24 39 / 18%);
+}
+
+button:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+}
+
+button:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgb(96 165 250 / 24%);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+  transform: none;
+}
+
+.secondary-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.secondary {
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.secondary:hover {
+  background: #182235;
+}
+
+.status {
+  min-height: 18px;
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+.status.success {
+  color: var(--success);
+}
+
+.activity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+h2 {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.link-button {
+  min-height: auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.link-button:hover {
+  background: transparent;
+  transform: none;
+}
+
+.activity-log {
+  display: grid;
+  max-height: 160px;
+  margin: 0;
+  padding: 10px 10px 10px 26px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-strong);
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.activity-log:empty::before {
+  content: "Run a sort to see each processing step.";
+  display: block;
+  margin-left: -16px;
+  color: #8893a6;
+}
+
+.activity-log li {
+  margin: 0 0 5px;
+}
+
+.tab-count {
+  background: rgb(255 255 255 / 7%);
+}
