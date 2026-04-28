@@ -6,6 +6,7 @@ import { SORT_MODES, aiSortPlan, planOrFallback, titleSortPlan } from "./lib/sor
 const mode = document.querySelector("#mode");
 const contextMode = document.querySelector("#contextMode");
 const sortButton = document.querySelector("#sortButton");
+const sleepButton = document.querySelector("#sleepButton");
 const undoButton = document.querySelector("#undoButton");
 const optionsButton = document.querySelector("#optionsButton");
 const clearLogButton = document.querySelector("#clearLogButton");
@@ -22,6 +23,7 @@ async function init() {
   await refreshTabCount();
 
   sortButton.addEventListener("click", sortTabs);
+  sleepButton.addEventListener("click", sleepGroupsNow);
   undoButton.addEventListener("click", undoSort);
   optionsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
   clearLogButton.addEventListener("click", clearActivity);
@@ -283,4 +285,21 @@ function addValidationActivity(validation) {
 function describePlan(plan) {
   const names = plan.groups.map((group) => `${group.name} (${group.tabIds.length})`).join(", ");
   addActivity(`Final plan: ${names || "no groups"}.`);
+}
+
+
+async function sleepGroupsNow() {
+  sleepButton.disabled = true;
+  setStatus("Sleeping inactive grouped tabs...", "");
+  addActivity("Battery saver requested: discard inactive tabs in tab groups.");
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "SLEEP_GROUPS_NOW" });
+    if (!response.ok) throw new Error(response.error);
+    setStatus(response.message, "success");
+    addActivity(response.message);
+  } catch (error) {
+    setStatus(error.message || String(error), "error");
+  } finally {
+    sleepButton.disabled = false;
+  }
 }

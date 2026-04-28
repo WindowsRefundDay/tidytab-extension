@@ -9,6 +9,8 @@ test("DEFAULT_SETTINGS includes Chrome Built-in AI provider without changing the
   assert.equal(DEFAULT_SETTINGS.providers.chromeBuiltIn.model, "Gemini Nano");
   assert.equal(DEFAULT_SETTINGS.historyContextEnabled, false);
   assert.equal(DEFAULT_SETTINGS.historyLookbackHours, 24);
+  assert.equal(DEFAULT_SETTINGS.limiterEnabled, true);
+  assert.equal(DEFAULT_SETTINGS.limiterProfile, "balanced");
 });
 
 test("mergeSettings preserves Chrome Built-in AI defaults", () => {
@@ -33,7 +35,8 @@ test("simple presets encode max accuracy and local Chrome Nano tradeoffs", () =>
     historyContextEnabled: true,
     historyLookbackHours: 48,
     historyMaxVisitsPerTab: 10,
-    historyNearbyLimit: 16
+    historyNearbyLimit: 16,
+    batterySaverEnabled: false
   });
 
   assert.deepEqual(SIMPLE_PRESETS.local.settings, {
@@ -44,6 +47,11 @@ test("simple presets encode max accuracy and local Chrome Nano tradeoffs", () =>
     historyContextEnabled: true,
     historyLookbackHours: 24,
     historyMaxVisitsPerTab: 6,
-    historyNearbyLimit: 8
+    historyNearbyLimit: 8,
+    batterySaverEnabled: true,
+    batterySaverAutoSleepMinutes: 15,
+    limiterProfile: "aggressive",
+    limiterStartMinutes: 5,
+    limiterSleepMinutes: 15
   });
 });
