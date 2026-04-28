@@ -121,6 +121,46 @@
           Nearby history entries
           <input id="historyNearbyLimit" type="number" min="0" max="50" step="1">
         </label>
+                <h3>Battery saver</h3>
+        <h3>CPU/Memory limiter (Opera GX style)</h3>
+        <label class="checkbox">
+          <input id="limiterEnabled" type="checkbox">
+          Enable progressive per-tab limiting
+        </label>
+        <label>
+          Limiter profile
+          <select id="limiterProfile">
+            <option value="balanced">Balanced</option>
+            <option value="aggressive">Aggressive battery</option>
+            <option value="relaxed">Relaxed responsiveness</option>
+          </select>
+        </label>
+        <label>
+          Start limiting after inactivity (minutes)
+          <input id="limiterStartMinutes" type="number" min="1" max="120" step="1">
+        </label>
+        <label>
+          Force sleep after inactivity (minutes)
+          <input id="limiterSleepMinutes" type="number" min="5" max="360" step="5">
+        </label>
+
+        <label class="checkbox">
+          <input id="batterySaverEnabled" type="checkbox">
+          Sleep inactive grouped tabs automatically
+        </label>
+        <label>
+          Auto-sleep after minutes of inactivity
+          <input id="batterySaverAutoSleepMinutes" type="number" min="5" max="240" step="5">
+        </label>
+        <label class="checkbox">
+          <input id="batterySaverDiscardAudioTabs" type="checkbox">
+          Allow sleeping audible tabs
+        </label>
+        <label class="checkbox">
+          <input id="batterySaverCollapseGroupsAfterSleep" type="checkbox">
+          Collapse groups after sleeping tabs
+        </label>
+
         <p class="notice">API keys are stored in Chrome extension local storage. This is convenient for local use, but it is not a secure secret vault.</p>
         <p class="notice">History context is optional. If enabled, Chrome will ask for history access, and recent history details may be sent to the selected AI provider during AI sorting.</p>
       </section>
