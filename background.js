@@ -8,15 +8,18 @@ import { summarizeSnippetFailures } from "./lib/warnings.js";
 const PAGE_PERMISSION = { origins: ["<all_urls>"] };
 const SORT_STATUS_KEY = "aiTabSorterSortStatus";
 const PAGE_SNIPPET_TIMEOUT_MS = 2500;
+const BATTERY_ALARM = "battery-saver-check";
 
 let activeSortPromise = null;
 
 chrome.runtime.onInstalled.addListener(() => {
   syncActionPopup().catch(() => {});
+  scheduleBatterySaverAlarm().catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {
   syncActionPopup().catch(() => {});
+  scheduleBatterySaverAlarm().catch(() => {});
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -36,6 +39,11 @@ chrome.action.onClicked.addListener(() => {
   });
 });
 
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm?.name !== BATTERY_ALARM) return;
+  runBatterySaverPass().catch(() => {});
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   handleMessage(message)
     .then((response) => sendResponse({ ok: true, ...response }))
@@ -45,7 +53,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function handleMessage(message) {
   if (message?.type === "GET_TAB_COUNT") {
-    const tabs = await chrome.tabs.query({ currentWindow: true });
+    const tabs = await chrome.tabs.query({});
     return { count: tabs.length };
   }
 
@@ -76,6 +84,10 @@ async function handleMessage(message) {
 
   if (message?.type === "SORT_TABS") {
     return sortTabs(message.payload || {});
+  }
+
+  if (message?.type === "SLEEP_GROUPS_NOW") {
+    return runBatterySaverPass({ force: true });
   }
 
   throw new Error("Unknown message.");
@@ -537,4 +549,71 @@ async function applySortPlan(plan, allowedTabIds) {
   }
 
   return moved;
+}
+
+
+async function scheduleBatterySaverAlarm() {
+  await chrome.alarms.create(BATTERY_ALARM, { periodInMinutes: 5 });
+}
+
+async function runBatterySaverPass(options = {}) {
+  const settings = await loadSettings();
+  if (!settings.batterySaverEnabled && !options.force) {
+    return { message: "Battery saver is disabled.", sleptTabs: 0, groups: 0 };
+  }
+
+  const tabs = await chrome.tabs.query({});
+  const now = Date.now();
+  const profile = resolveLimiterProfile(settings.limiterProfile);
+  const startMs = (settings.limiterEnabled ? settings.limiterStartMinutes : settings.batterySaverAutoSleepMinutes) * 60_000;
+  const sleepMs = (settings.limiterEnabled ? settings.limiterSleepMinutes : settings.batterySaverAutoSleepMinutes) * 60_000;
+  const candidates = [];
+
+  for (const tab of tabs) {
+    if (!Number.isFinite(tab.id) || tab.pinned || tab.active || tab.discarded) continue;
+    if (tab.groupId == null || tab.groupId < 0) continue;
+    if (tab.audible && !settings.batterySaverDiscardAudioTabs) continue;
+
+    const inactiveMs = Math.max(0, now - (tab.lastAccessed || 0));
+    if (!options.force && inactiveMs < startMs) continue;
+
+    const pressure = Math.min(1, inactiveMs / Math.max(startMs, 1));
+    const score = pressure * profile.multiplier;
+
+    if (settings.limiterEnabled && inactiveMs >= startMs && inactiveMs < sleepMs) {
+      await chrome.tabs.update(tab.id, { autoDiscardable: true }).catch(() => {});
+      if (score > 1.25) {
+        await chrome.tabs.discard(tab.id).catch(() => {});
+      }
+      continue;
+    }
+
+    if (options.force || inactiveMs >= sleepMs || score > 1.75) {
+      candidates.push(tab);
+    }
+  }
+
+  for (const tab of candidates) {
+    await chrome.tabs.update(tab.id, { autoDiscardable: true }).catch(() => {});
+    await chrome.tabs.discard(tab.id).catch(() => {});
+  }
+
+  const groups = new Set(candidates.map((tab) => tab.groupId).filter((id) => id >= 0));
+  if (settings.batterySaverCollapseGroupsAfterSleep) {
+    for (const groupId of groups) {
+      await chrome.tabGroups.update(groupId, { collapsed: true }).catch(() => {});
+    }
+  }
+
+  return {
+    message: `Slept ${candidates.length} tab${candidates.length === 1 ? "" : "s"} across ${groups.size} group${groups.size === 1 ? "" : "s"}.`,
+    sleptTabs: candidates.length,
+    groups: groups.size
+  };
+}
+
+function resolveLimiterProfile(value) {
+  if (value === "aggressive") return { multiplier: 1.5 };
+  if (value === "relaxed") return { multiplier: 0.9 };
+  return { multiplier: 1.15 };
 }

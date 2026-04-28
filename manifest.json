@@ -8,7 +8,8 @@
     "tabs",
     "tabGroups",
     "storage",
-    "scripting"
+    "scripting",
+    "alarms"
   ],
   "host_permissions": [
     "https://api.openai.com/*",

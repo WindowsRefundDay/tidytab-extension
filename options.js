@@ -22,6 +22,14 @@ const fields = {
   historyLookbackHours: document.querySelector("#historyLookbackHours"),
   historyMaxVisitsPerTab: document.querySelector("#historyMaxVisitsPerTab"),
   historyNearbyLimit: document.querySelector("#historyNearbyLimit"),
+  batterySaverEnabled: document.querySelector("#batterySaverEnabled"),
+  batterySaverAutoSleepMinutes: document.querySelector("#batterySaverAutoSleepMinutes"),
+  batterySaverDiscardAudioTabs: document.querySelector("#batterySaverDiscardAudioTabs"),
+  batterySaverCollapseGroupsAfterSleep: document.querySelector("#batterySaverCollapseGroupsAfterSleep"),
+  limiterEnabled: document.querySelector("#limiterEnabled"),
+  limiterProfile: document.querySelector("#limiterProfile"),
+  limiterStartMinutes: document.querySelector("#limiterStartMinutes"),
+  limiterSleepMinutes: document.querySelector("#limiterSleepMinutes"),
   openaiApiKey: document.querySelector("#openaiApiKey"),
   openaiModel: document.querySelector("#openaiModel"),
   compatibleBaseUrl: document.querySelector("#compatibleBaseUrl"),
@@ -81,6 +89,14 @@ function render(settings) {
   fields.historyLookbackHours.value = settings.historyLookbackHours;
   fields.historyMaxVisitsPerTab.value = settings.historyMaxVisitsPerTab;
   fields.historyNearbyLimit.value = settings.historyNearbyLimit;
+  fields.batterySaverEnabled.checked = Boolean(settings.batterySaverEnabled);
+  fields.batterySaverAutoSleepMinutes.value = settings.batterySaverAutoSleepMinutes;
+  fields.batterySaverDiscardAudioTabs.checked = Boolean(settings.batterySaverDiscardAudioTabs);
+  fields.batterySaverCollapseGroupsAfterSleep.checked = Boolean(settings.batterySaverCollapseGroupsAfterSleep);
+  fields.limiterEnabled.checked = Boolean(settings.limiterEnabled);
+  fields.limiterProfile.value = settings.limiterProfile;
+  fields.limiterStartMinutes.value = settings.limiterStartMinutes;
+  fields.limiterSleepMinutes.value = settings.limiterSleepMinutes;
   fields.openaiApiKey.value = settings.providers.openai.apiKey;
   fields.openaiModel.value = settings.providers.openai.model;
   fields.compatibleBaseUrl.value = settings.providers.compatible.baseUrl;
@@ -112,6 +128,14 @@ function readForm() {
       25
     ),
     historyNearbyLimit: clamp(Number(fields.historyNearbyLimit.value) || DEFAULT_SETTINGS.historyNearbyLimit, 0, 50),
+    batterySaverEnabled: fields.batterySaverEnabled.checked,
+    batterySaverAutoSleepMinutes: clamp(Number(fields.batterySaverAutoSleepMinutes.value) || DEFAULT_SETTINGS.batterySaverAutoSleepMinutes, 5, 240),
+    batterySaverDiscardAudioTabs: fields.batterySaverDiscardAudioTabs.checked,
+    batterySaverCollapseGroupsAfterSleep: fields.batterySaverCollapseGroupsAfterSleep.checked,
+    limiterEnabled: fields.limiterEnabled.checked,
+    limiterProfile: fields.limiterProfile.value,
+    limiterStartMinutes: clamp(Number(fields.limiterStartMinutes.value) || DEFAULT_SETTINGS.limiterStartMinutes, 1, 120),
+    limiterSleepMinutes: clamp(Number(fields.limiterSleepMinutes.value) || DEFAULT_SETTINGS.limiterSleepMinutes, 5, 360),
     providers: {
       openai: {
         apiKey: fields.openaiApiKey.value.trim(),
@@ -171,6 +195,14 @@ function advancedFields() {
     fields.historyLookbackHours,
     fields.historyMaxVisitsPerTab,
     fields.historyNearbyLimit,
+    fields.batterySaverEnabled,
+    fields.batterySaverAutoSleepMinutes,
+    fields.batterySaverDiscardAudioTabs,
+    fields.batterySaverCollapseGroupsAfterSleep,
+    fields.limiterEnabled,
+    fields.limiterProfile,
+    fields.limiterStartMinutes,
+    fields.limiterSleepMinutes,
     fields.openaiModel,
     fields.compatibleBaseUrl,
     fields.compatibleModel,
