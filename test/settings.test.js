@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, SIMPLE_PRESETS, mergeSettings } from "../lib/settings
 test("DEFAULT_SETTINGS includes Chrome Built-in AI provider without changing the default", () => {
   assert.equal(DEFAULT_SETTINGS.provider, "openai");
   assert.equal(DEFAULT_SETTINGS.sortMode, "agentic");
+  assert.equal(DEFAULT_SETTINGS.sortOnActionClick, false);
   assert.equal(DEFAULT_SETTINGS.providers.chromeBuiltIn.model, "Gemini Nano");
   assert.equal(DEFAULT_SETTINGS.historyContextEnabled, false);
   assert.equal(DEFAULT_SETTINGS.historyLookbackHours, 24);

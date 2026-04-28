@@ -39,7 +39,7 @@
         </div>
       </section>
 
-      <details open>
+      <details>
         <summary>Advanced</summary>
 
       <section class="surface">
@@ -86,6 +86,10 @@
 
       <section class="surface">
         <h2>Context</h2>
+        <label class="checkbox">
+          <input id="sortOnActionClick" type="checkbox">
+          Click extension icon to sort immediately
+        </label>
         <label>
           Default sort mode
           <select id="sortMode">
@@ -129,7 +133,6 @@
 
       <footer class="action-bar">
         <button id="saveButton" type="button">Save</button>
-        <button id="testButton" type="button" class="secondary">Test provider</button>
         <button id="resetButton" type="button" class="danger">Reset</button>
       </footer>
 

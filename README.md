@@ -19,6 +19,9 @@ A dependency-free Manifest V3 Chrome extension that sorts the current browser wi
 
 Use **Undo last sort** in the popup to restore the most recent pre-sort tab order and group state. Closed tabs are skipped during undo.
 
+Enable **Click extension icon to sort immediately** in Options to make the toolbar button run the saved default sort instead of opening the popup. Right-click the extension icon and choose Options to turn the popup back on.
+Chrome Built-in AI is disabled while this option is on because Chrome's local model session needs the popup/user-activation flow.
+
 ## Providers
 
 - OpenAI Responses API

@@ -13,6 +13,8 @@ import { CHROME_BUILT_IN_PROVIDER, checkChromeBuiltInAvailability, testChromeBui
 const fields = {
   presets: [...document.querySelectorAll('input[name="preset"]')],
   provider: document.querySelector("#provider"),
+  chromeBuiltInOption: document.querySelector('#provider option[value="chromeBuiltIn"]'),
+  sortOnActionClick: document.querySelector("#sortOnActionClick"),
   sortMode: document.querySelector("#sortMode"),
   contextMode: document.querySelector("#contextMode"),
   maxSnippetLength: document.querySelector("#maxSnippetLength"),
@@ -34,7 +36,6 @@ const fields = {
 };
 
 const saveButton = document.querySelector("#saveButton");
-const testButton = document.querySelector("#testButton");
 const resetButton = document.querySelector("#resetButton");
 const availabilityButton = document.querySelector("#availabilityButton");
 const status = document.querySelector("#status");
@@ -51,6 +52,10 @@ async function init() {
     showProvider(fields.provider.value);
     syncPresetSelection(readForm());
   });
+  fields.sortOnActionClick.addEventListener("change", () => {
+    syncActionClickProviderAvailability();
+    syncPresetSelection(readForm());
+  });
   fields.presets.forEach((preset) => {
     preset.addEventListener("change", () => {
       if (!preset.checked) return;
@@ -62,13 +67,13 @@ async function init() {
     field.addEventListener("input", () => syncPresetSelection(readForm()));
   });
   saveButton.addEventListener("click", save);
-  testButton.addEventListener("click", test);
   resetButton.addEventListener("click", reset);
   availabilityButton.addEventListener("click", checkAvailability);
 }
 
 function render(settings) {
   fields.provider.value = settings.provider;
+  fields.sortOnActionClick.checked = Boolean(settings.sortOnActionClick);
   fields.sortMode.value = settings.sortMode;
   fields.contextMode.value = settings.contextMode;
   fields.maxSnippetLength.value = settings.maxSnippetLength;
@@ -88,12 +93,14 @@ function render(settings) {
   fields.geminiApiKey.value = settings.providers.gemini.apiKey;
   fields.geminiModel.value = settings.providers.gemini.model;
   showProvider(settings.provider);
+  syncActionClickProviderAvailability();
   syncPresetSelection(settings);
 }
 
 function readForm() {
   return {
     provider: fields.provider.value,
+    sortOnActionClick: fields.sortOnActionClick.checked,
     sortMode: fields.sortMode.value,
     contextMode: fields.contextMode.value,
     maxSnippetLength: clamp(Number(fields.maxSnippetLength.value) || DEFAULT_SETTINGS.maxSnippetLength, 300, 4000),
@@ -175,39 +182,36 @@ function advancedFields() {
 }
 
 async function save() {
+  saveButton.disabled = true;
   try {
     const settings = readForm();
+    if (hasActionClickProviderConflict(settings)) {
+      throw new Error(actionClickProviderConflictMessage());
+    }
+    setStatus("Checking provider...", "");
     await requestOptionalPermissions(settings);
+    await verifyProvider(settings);
     currentSettings = await saveSettings(settings);
     render(currentSettings);
-    setStatus("Options saved.", "success");
-  } catch (error) {
-    setStatus(error.message || String(error), "error");
-  }
-}
-
-async function test() {
-  testButton.disabled = true;
-  setStatus("Testing provider...", "");
-  try {
-    const settings = readForm();
-    await requestOptionalPermissions(settings);
-    await saveSettings(settings);
-    if (settings.provider === CHROME_BUILT_IN_PROVIDER) {
-      await testChromeBuiltInProvider({
-        onDownloadProgress(progress) {
-          setStatus(`Downloading Chrome Built-in AI model... ${Math.round(progress * 100)}%`, "");
-        }
-      });
-    } else {
-      await testProvider(settings);
-    }
-    setStatus("Provider returned a valid response.", "success");
+    setStatus("Provider checked. Options saved.", "success");
   } catch (error) {
     setStatus(error.message || String(error), "error");
   } finally {
-    testButton.disabled = false;
+    saveButton.disabled = false;
   }
+}
+
+async function verifyProvider(settings) {
+  if (settings.provider === CHROME_BUILT_IN_PROVIDER) {
+    await testChromeBuiltInProvider({
+      onDownloadProgress(progress) {
+        setStatus(`Downloading Chrome Built-in AI model... ${Math.round(progress * 100)}%`, "");
+      }
+    });
+    return;
+  }
+
+  await testProvider(settings);
 }
 
 async function reset() {
@@ -253,6 +257,25 @@ function showProvider(provider) {
   document.querySelectorAll("[data-provider-panel]").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.providerPanel === provider);
   });
+}
+
+function syncActionClickProviderAvailability() {
+  const disabled = fields.sortOnActionClick.checked;
+  fields.chromeBuiltInOption.disabled = disabled;
+
+  if (disabled && fields.provider.value === CHROME_BUILT_IN_PROVIDER) {
+    fields.provider.value = DEFAULT_SETTINGS.provider;
+    showProvider(fields.provider.value);
+    setStatus(actionClickProviderConflictMessage(), "");
+  }
+}
+
+function hasActionClickProviderConflict(settings) {
+  return settings.sortOnActionClick && settings.provider === CHROME_BUILT_IN_PROVIDER;
+}
+
+function actionClickProviderConflictMessage() {
+  return "Chrome Built-in AI is disabled while icon-click sorting is on because it needs the popup/user activation flow.";
 }
 
 function setStatus(message, className) {

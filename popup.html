@@ -16,29 +16,10 @@
             <p>AI tab control</p>
           </div>
         </div>
-        <p id="tabCount" class="tab-count">Loading tabs...</p>
       </header>
 
-      <section class="control-panel" aria-label="Sort controls">
-        <label>
-          <span>Sort mode</span>
-          <select id="mode">
-            <option value="title">Title Sort</option>
-            <option value="smart">Smart AI Sort</option>
-            <option value="agentic">Agentic Sort</option>
-          </select>
-        </label>
-
-        <label>
-          <span>Context</span>
-          <select id="contextMode">
-            <option value="metadata">Title + URL</option>
-            <option value="page">Page snippets</option>
-          </select>
-        </label>
-      </section>
-
       <section class="actions" aria-label="Actions">
+        <p id="localAiWarning" class="local-ai-warning" hidden>Chrome Built-in AI runs inside this popup. Keep it open until sorting finishes.</p>
         <button id="sortButton" type="button">Sort current window</button>
         <div class="secondary-actions">
           <button id="undoButton" type="button" class="secondary">Undo</button>
@@ -47,13 +28,23 @@
       </section>
 
       <section id="status" class="status" role="status" aria-live="polite"></section>
-      <section class="activity" aria-label="Processing trace">
+      <section class="activity" aria-label="Status steps">
         <div class="activity-header">
-          <h2>Processing trace</h2>
+          <h2>Status</h2>
           <button id="clearLogButton" type="button" class="link-button">Clear</button>
         </div>
         <ol id="activityLog" class="activity-log"></ol>
       </section>
+
+      <div id="keepOpenModal" class="keep-open-modal" role="alertdialog" aria-labelledby="keepOpenTitle" aria-describedby="keepOpenText" hidden>
+        <div class="keep-open-card">
+          <div class="keep-open-spinner" aria-hidden="true"></div>
+          <div>
+            <h2 id="keepOpenTitle">Keep this popup open</h2>
+            <p id="keepOpenText">Chrome Built-in AI is sorting locally. Closing this popup can stop the sort before it finishes.</p>
+          </div>
+        </div>
+      </div>
     </main>
 
     <script src="popup.js" type="module"></script>

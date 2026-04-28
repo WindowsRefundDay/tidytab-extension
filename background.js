@@ -3,8 +3,38 @@ import { callAiProvider } from "./lib/providers.js";
 import { enrichTabsWithHistory } from "./lib/historyContext.js";
 import { createUndoSnapshot, groupRestorePlan, LAST_SORT_SNAPSHOT_KEY } from "./lib/undo.js";
 import { SORT_MODES, aiSortPlan, planOrFallback, titleSortPlan } from "./lib/sorters.js";
+import { summarizeSnippetFailures } from "./lib/warnings.js";
 
 const PAGE_PERMISSION = { origins: ["<all_urls>"] };
+const SORT_STATUS_KEY = "aiTabSorterSortStatus";
+const PAGE_SNIPPET_TIMEOUT_MS = 2500;
+
+let activeSortPromise = null;
+
+chrome.runtime.onInstalled.addListener(() => {
+  syncActionPopup().catch(() => {});
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  syncActionPopup().catch(() => {});
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && changes.aiTabSorterSettings) {
+    syncActionPopup().catch(() => {});
+  }
+});
+
+chrome.action.onClicked.addListener(() => {
+  sortFromActionClick().catch((error) => {
+    chrome.action.setBadgeText({ text: "!" });
+    chrome.action.setTitle({ title: `TidyTab sort failed: ${error.message || String(error)}` });
+    setTimeout(() => {
+      chrome.action.setBadgeText({ text: "" });
+      chrome.action.setTitle({ title: "TidyTab" });
+    }, 5000);
+  });
+});
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   handleMessage(message)
@@ -17,6 +47,19 @@ async function handleMessage(message) {
   if (message?.type === "GET_TAB_COUNT") {
     const tabs = await chrome.tabs.query({ currentWindow: true });
     return { count: tabs.length };
+  }
+
+  if (message?.type === "GET_SORT_STATUS") {
+    return { status: await getSortStatus() };
+  }
+
+  if (message?.type === "CLEAR_SORT_STATUS") {
+    await clearSortStatus();
+    return { status: await getSortStatus() };
+  }
+
+  if (message?.type === "START_SORT_PROCESS") {
+    return startPersistentSort();
   }
 
   if (message?.type === "PREPARE_SORT_INPUT") {
@@ -38,9 +81,228 @@ async function handleMessage(message) {
   throw new Error("Unknown message.");
 }
 
+async function getSortStatus() {
+  const result = await chrome.storage.local.get(SORT_STATUS_KEY);
+  return (
+    result[SORT_STATUS_KEY] || {
+      running: false,
+      message: "",
+      className: "",
+      steps: []
+    }
+  );
+}
+
+async function setSortStatus(patch) {
+  const current = await getSortStatus();
+  const next = {
+    ...current,
+    ...patch,
+    updatedAt: Date.now()
+  };
+  await chrome.storage.local.set({ [SORT_STATUS_KEY]: next });
+  return next;
+}
+
+async function clearSortStatus() {
+  await chrome.storage.local.remove(SORT_STATUS_KEY);
+}
+
+async function addSortStep(message, className = "") {
+  const current = await getSortStatus();
+  const steps = (current.steps || []).map((step, index, list) => ({
+    ...step,
+    state: index === list.length - 1 && step.state === "active" ? "complete" : step.state
+  }));
+  steps.push({
+    id: `${Date.now()}-${steps.length}`,
+    message,
+    className,
+    state: className === "error" ? "active" : "active"
+  });
+  return setSortStatus({ steps });
+}
+
+async function startPersistentSort() {
+  if (activeSortPromise) {
+    await activeSortPromise;
+    return { status: await getSortStatus() };
+  }
+
+  await setSortStatus({
+    running: true,
+    message: "Sorting tabs...",
+    className: "",
+    steps: []
+  });
+
+  activeSortPromise = runPersistentSort()
+    .catch(() => {})
+    .finally(() => {
+      activeSortPromise = null;
+    });
+
+  await activeSortPromise;
+  return { status: await getSortStatus() };
+}
+
+async function runPersistentSort() {
+  try {
+    await addSortStep("Loading saved sorting preferences.");
+    const settings = await loadSettings();
+    await addSortStep(`Provider ready: ${providerLabel(settings.provider)}.`);
+
+    if (settings.contextMode === "page" && settings.sortMode !== SORT_MODES.TITLE) {
+      await addSortStep("Using granted page access for snippets.");
+    }
+
+    if (settings.sortMode !== SORT_MODES.TITLE) {
+      await addSortStep(settings.historyContextEnabled ? "History signal is enabled." : "History signal is off.");
+    }
+
+    const mode =
+      settings.provider === "chromeBuiltIn" && settings.sortMode !== SORT_MODES.TITLE
+        ? SORT_MODES.TITLE
+        : settings.sortMode || SORT_MODES.TITLE;
+    if (mode !== settings.sortMode) {
+      await addSortStep("Chrome Built-in AI needs the popup open; using title sort for background sorting.");
+    }
+
+    await addSortStep("Preparing current-window tabs.");
+    await setSortStatus({ message: "Preparing current-window tabs...", className: "" });
+    const prepared = await prepareSortInput({
+      mode,
+      contextMode: settings.contextMode,
+      maxSnippetLength: settings.maxSnippetLength
+    });
+
+    if (!prepared.tabs.length) {
+      await setSortStatus({
+        running: false,
+        message: "No movable tabs found in this window.",
+        className: "success"
+      });
+      return;
+    }
+
+    await describePersistentPreparedInput(prepared);
+
+    let plan;
+    let statusClass = "success";
+    if (mode === SORT_MODES.TITLE) {
+      await addSortStep("Sorting by title and domain.");
+      plan = titleSortPlan(prepared.tabs);
+    } else {
+      await addSortStep("Sending structured sort request to the selected AI provider.");
+      const validation = await aiSortPlan(prepared.tabs, mode, async (prompt, meta) => {
+        await announcePersistentAiPhase(providerLabel(settings.provider), meta.phase);
+        return callAiProvider(settings, prompt);
+      });
+      await addPersistentValidationActivity(validation);
+      plan = planOrFallback(validation, prepared.tabs);
+      statusClass = validation.ok ? "success" : "";
+    }
+
+    plan.warnings.push(...prepared.warnings);
+    await describePersistentPlan(plan);
+    await addSortStep("Applying tab moves and groups.");
+    const applied = await applyPreparedSortPlan({ plan });
+    const suffix = applied.warnings?.length ? ` ${applied.warnings.join(" ")}` : "";
+    await setSortStatus({
+      running: false,
+      message: `${applied.message}${suffix}`,
+      className: statusClass
+    });
+  } catch (error) {
+    await addSortStep(error.message || String(error), "error");
+    await setSortStatus({
+      running: false,
+      message: error.message || String(error),
+      className: "error"
+    });
+  }
+}
+
+function providerLabel(value) {
+  if (value === "openai") return "OpenAI";
+  if (value === "compatible") return "OpenAI-compatible";
+  if (value === "vertex") return "Google Vertex AI";
+  if (value === "gemini") return "Gemini API key";
+  if (value === "chromeBuiltIn") return "Chrome Built-in AI";
+  return value;
+}
+
+async function describePersistentPreparedInput(prepared) {
+  const tabs = prepared.tabs || [];
+  const snippetCount = tabs.filter((tab) => tab.snippet).length;
+  const historyCount = tabs.filter((tab) => tab.history).length;
+  await addSortStep(`Prepared ${tabs.length} movable tab${tabs.length === 1 ? "" : "s"}.`);
+  if (snippetCount) await addSortStep(`Included page snippets for ${snippetCount} tab${snippetCount === 1 ? "" : "s"}.`);
+  if (historyCount) await addSortStep(`Included history signal for ${historyCount} tab${historyCount === 1 ? "" : "s"}.`);
+  for (const warning of prepared.warnings || []) {
+    await addSortStep(`Warning: ${warning}`);
+  }
+}
+
+async function announcePersistentAiPhase(provider, phase) {
+  if (phase === "agentic-discovery") {
+    await setSortStatus({ message: `${provider} is drafting workflow groups...`, className: "" });
+    await addSortStep("AI phase 1: infer workflows and candidate groups.");
+  } else if (phase === "agentic-finalize") {
+    await setSortStatus({ message: `${provider} is refining groups...`, className: "" });
+    await addSortStep("AI phase 2: normalize groups, sequence tabs, and check coverage.");
+  } else {
+    await setSortStatus({ message: `${provider} is sorting tabs...`, className: "" });
+    await addSortStep("AI phase: infer groups and order.");
+  }
+}
+
+async function addPersistentValidationActivity(validation) {
+  if (validation.ok) {
+    await addSortStep(`Validated AI plan with ${validation.plan.groups.length} group${validation.plan.groups.length === 1 ? "" : "s"}.`);
+  } else {
+    await addSortStep(`AI plan failed validation: ${validation.reason || "unknown reason"}.`);
+    await addSortStep("Fallback: using deterministic title/domain sort.");
+  }
+}
+
+async function describePersistentPlan(plan) {
+  const names = plan.groups.map((group) => `${group.name} (${group.tabIds.length})`).join(", ");
+  await addSortStep(`Final plan: ${names || "no groups"}.`);
+}
+
+async function syncActionPopup() {
+  const settings = await loadSettings();
+  await chrome.action.setPopup({ popup: settings.sortOnActionClick ? "" : "popup.html" });
+  await chrome.action.setTitle({
+    title: settings.sortOnActionClick ? "TidyTab: click to sort current window" : "TidyTab"
+  });
+}
+
+async function sortFromActionClick() {
+  const settings = await loadSettings();
+  await chrome.action.setBadgeBackgroundColor({ color: "#2563eb" });
+  await chrome.action.setBadgeText({ text: "..." });
+
+  try {
+    const mode =
+      settings.provider === "chromeBuiltIn" && settings.sortMode !== SORT_MODES.TITLE
+        ? SORT_MODES.TITLE
+        : settings.sortMode || SORT_MODES.AGENTIC;
+    await sortTabs({
+      mode,
+      contextMode: settings.contextMode
+    });
+    await chrome.action.setBadgeBackgroundColor({ color: "#067647" });
+    await chrome.action.setBadgeText({ text: "OK" });
+  } finally {
+    setTimeout(() => chrome.action.setBadgeText({ text: "" }), 1500);
+  }
+}
+
 async function sortTabs(payload) {
   const settings = await loadSettings();
-  const mode = payload.mode || SORT_MODES.TITLE;
+  const mode = payload.mode || settings.sortMode || SORT_MODES.TITLE;
   const prepared = await prepareSortInput({
     mode,
     contextMode: payload.contextMode || settings.contextMode,
@@ -198,6 +460,7 @@ async function withPageSnippets(tabs, maxSnippetLength, warnings) {
   }
 
   const enriched = [];
+  const snippetFailures = [];
   for (const tab of tabs) {
     if (!/^https?:\/\//i.test(tab.url || "")) {
       enriched.push(tab);
@@ -205,23 +468,45 @@ async function withPageSnippets(tabs, maxSnippetLength, warnings) {
     }
 
     try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ["content-extractor.js"]
-      });
-      const [result] = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: (limit) => window.__aiTabSorterExtract?.(limit) || "",
-        args: [maxSnippetLength]
-      });
+      await withTimeout(
+        chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ["content-extractor.js"]
+        }),
+        PAGE_SNIPPET_TIMEOUT_MS,
+        "snippet injector timed out"
+      );
+      const [result] = await withTimeout(
+        chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (limit) => window.__aiTabSorterExtract?.(limit) || "",
+          args: [maxSnippetLength]
+        }),
+        PAGE_SNIPPET_TIMEOUT_MS,
+        "snippet extraction timed out"
+      );
       enriched.push({ ...tab, snippet: result?.result || "" });
-    } catch {
-      warnings.push(`Could not inspect "${tab.title || tab.url}".`);
+    } catch (error) {
+      snippetFailures.push({
+        title: tab.title || "",
+        url: tab.url || "",
+        reason: error.message || String(error)
+      });
       enriched.push(tab);
     }
   }
 
+  warnings.push(...summarizeSnippetFailures(snippetFailures));
   return enriched;
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
 }
 
 async function applySortPlan(plan, allowedTabIds) {

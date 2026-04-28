@@ -1,131 +1,231 @@
-import { withChromeBuiltInSession, promptChromeBuiltIn } from "./lib/chromeBuiltIn.js";
-import { callAiProvider } from "./lib/providers.js";
-import { loadSettings, saveSettings } from "./lib/settings.js";
+import { loadSettings } from "./lib/settings.js";
+import { CHROME_BUILT_IN_PROVIDER, promptChromeBuiltIn, withChromeBuiltInSession } from "./lib/chromeBuiltIn.js";
 import { SORT_MODES, aiSortPlan, planOrFallback, titleSortPlan } from "./lib/sorters.js";
 
-const mode = document.querySelector("#mode");
-const contextMode = document.querySelector("#contextMode");
+const SORT_STATUS_KEY = "aiTabSorterSortStatus";
+
 const sortButton = document.querySelector("#sortButton");
 const undoButton = document.querySelector("#undoButton");
 const optionsButton = document.querySelector("#optionsButton");
 const clearLogButton = document.querySelector("#clearLogButton");
+const localAiWarning = document.querySelector("#localAiWarning");
+const keepOpenModal = document.querySelector("#keepOpenModal");
 const status = document.querySelector("#status");
-const tabCount = document.querySelector("#tabCount");
 const activityLog = document.querySelector("#activityLog");
 
 init();
 
 async function init() {
-  const settings = await loadSettings();
-  mode.value = settings.sortMode;
-  contextMode.value = settings.contextMode;
-  await refreshTabCount();
-
-  sortButton.addEventListener("click", sortTabs);
+  sortButton.addEventListener("click", startSort);
   undoButton.addEventListener("click", undoSort);
   optionsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
   clearLogButton.addEventListener("click", clearActivity);
+  chrome.storage.onChanged.addListener(handleStorageChange);
+  await updateLocalAiWarning();
+  await restoreStatus();
 }
 
-async function refreshTabCount() {
-  const response = await chrome.runtime.sendMessage({ type: "GET_TAB_COUNT" });
-  const settings = await loadSettings();
-  const historyText = settings.historyContextEnabled ? " • history-aware AI on" : "";
-  tabCount.textContent = `${response.count} tab${response.count === 1 ? "" : "s"} in current window${historyText}`;
-}
-
-async function sortTabs() {
-  clearActivity();
-  setStatus("Sorting tabs...", "");
-  addActivity(`Mode: ${modeLabel(mode.value)}. Context: ${contextMode.value === "page" ? "page snippets" : "title + URL"}.`);
+async function startSort() {
   sortButton.disabled = true;
+  setStatus("Sorting tabs...", "");
+  renderSteps([{ message: "Starting background sort.", state: "active" }]);
 
   try {
     const settings = await loadSettings();
-    settings.sortMode = mode.value;
-    settings.contextMode = contextMode.value;
-    await saveSettings(settings);
-    addActivity(`Provider: ${providerLabel(settings.provider)}.`);
-
-    if (contextMode.value === "page" && mode.value !== "title") {
-      addActivity("Requesting page access for snippet extraction.");
+    toggleLocalAiWarning(settings);
+    if (settings.contextMode === "page" && settings.sortMode !== SORT_MODES.TITLE) {
+      setStatus("Requesting page access...", "");
       const granted = await chrome.permissions.request({ origins: ["<all_urls>"] });
       if (!granted) {
         throw new Error("Page snippets need site access. Switch to Title + URL or grant access.");
       }
     }
 
-    if (mode.value !== SORT_MODES.TITLE) {
-      addActivity(settings.historyContextEnabled ? "History-aware context is enabled." : "History-aware context is off.");
-    }
-
-    if (settings.provider === "chromeBuiltIn" && mode.value !== SORT_MODES.TITLE) {
+    if (usesPopupLocalAi(settings)) {
       await sortWithChromeBuiltIn(settings);
       return;
     }
 
-    if (mode.value !== SORT_MODES.TITLE) {
-      await sortWithCloudAi(settings);
-      return;
-    }
-
-    addActivity("Using deterministic title/domain sort. No AI call is needed.");
-    const response = await chrome.runtime.sendMessage({
-      type: "SORT_TABS",
-      payload: {
-        mode: mode.value,
-        contextMode: contextMode.value
-      }
-    });
-
+    const response = await chrome.runtime.sendMessage({ type: "START_SORT_PROCESS" });
     if (!response.ok) throw new Error(response.error);
-
-    const suffix = response.warnings?.length ? ` ${response.warnings.join(" ")}` : "";
-    setStatus(`${response.message}${suffix}`, "success");
-    await refreshTabCount();
+    renderSortStatus(response.status);
   } catch (error) {
-    setStatus(error.message || String(error), "error");
+    renderSortStatus({
+      running: false,
+      message: error.message || String(error),
+      className: "error",
+      steps: [{ message: error.message || String(error), className: "error", state: "active" }]
+    });
   } finally {
     sortButton.disabled = false;
   }
 }
 
-function setStatus(message, className) {
-  status.textContent = message;
-  status.className = `status ${className}`.trim();
+async function updateLocalAiWarning() {
+  toggleLocalAiWarning(await loadSettings());
 }
 
-function addActivity(message) {
-  const item = document.createElement("li");
-  item.textContent = message;
-  activityLog.append(item);
-  activityLog.scrollTop = activityLog.scrollHeight;
+function toggleLocalAiWarning(settings) {
+  localAiWarning.hidden = !usesPopupLocalAi(settings);
 }
 
-function clearActivity() {
-  activityLog.replaceChildren();
+function usesPopupLocalAi(settings) {
+  return settings.provider === CHROME_BUILT_IN_PROVIDER && settings.sortMode !== SORT_MODES.TITLE;
 }
 
-function modeLabel(value) {
-  if (value === SORT_MODES.TITLE) return "Title Sort";
-  if (value === SORT_MODES.SMART) return "Smart AI Sort";
-  if (value === SORT_MODES.AGENTIC) return "Agentic Sort";
-  return value;
+async function sortWithChromeBuiltIn(settings) {
+  showKeepOpenModal();
+  renderSortStatus({
+    running: true,
+    message: "Keep this popup open while Chrome Built-in AI sorts.",
+    className: "",
+    steps: [
+      { message: "Chrome Built-in AI is running inside this popup.", state: "complete" },
+      { message: "Do not close this popup until sorting finishes.", state: "active" }
+    ]
+  });
+
+  try {
+    const prepared = await prepareSortInput(settings);
+    if (!prepared) return;
+
+    let plan = titleSortPlan(prepared.tabs);
+    const fallbackWarnings = [];
+
+    try {
+      addStep("Creating local Chrome Built-in AI session.");
+      setStatus("Starting Chrome Built-in AI. A first-time model download may be required...", "");
+      await withChromeBuiltInSession(
+        async (session) => {
+          const validation = await aiSortPlan(prepared.tabs, settings.sortMode, async (prompt, meta) => {
+            announceAiPhase("Chrome Built-in AI", meta.phase);
+            return promptChromeBuiltIn(session, prompt);
+          });
+          addValidationStep(validation);
+          plan = planOrFallback(validation, prepared.tabs);
+        },
+        {
+          onDownloadProgress(progress) {
+            setStatus(`Downloading Chrome Built-in AI model... ${Math.round(progress * 100)}%`, "");
+          }
+        }
+      );
+    } catch (error) {
+      addStep("Chrome Built-in AI failed; falling back to title/domain sort.");
+      fallbackWarnings.push(`${error.message || String(error)} Used title sort instead.`);
+    }
+
+    plan.warnings.push(...prepared.warnings, ...fallbackWarnings);
+    describePlan(plan);
+    await applySortPlan(plan, fallbackWarnings.length ? "" : "success");
+  } catch (error) {
+    setStatus(error.message || String(error), "error");
+    addStep(error.message || String(error), "error");
+  } finally {
+    hideKeepOpenModal();
+    sortButton.disabled = false;
+  }
 }
 
-function providerLabel(value) {
-  if (value === "openai") return "OpenAI";
-  if (value === "compatible") return "OpenAI-compatible";
-  if (value === "vertex") return "Google Vertex AI";
-  if (value === "gemini") return "Gemini API key";
-  if (value === "chromeBuiltIn") return "Chrome Built-in AI";
-  return value;
+function showKeepOpenModal() {
+  keepOpenModal.hidden = false;
+}
+
+function hideKeepOpenModal() {
+  keepOpenModal.hidden = true;
+}
+
+async function prepareSortInput(settings) {
+  addStep("Preparing current-window tabs.");
+  setStatus("Preparing current-window tabs...", "");
+  const prepared = await chrome.runtime.sendMessage({
+    type: "PREPARE_SORT_INPUT",
+    payload: {
+      mode: settings.sortMode,
+      contextMode: settings.contextMode,
+      maxSnippetLength: settings.maxSnippetLength
+    }
+  });
+
+  if (!prepared.ok) throw new Error(prepared.error);
+  if (!prepared.tabs.length) {
+    setStatus("No movable tabs found in this window.", "success");
+    return null;
+  }
+
+  describePreparedInput(prepared);
+  return prepared;
+}
+
+async function applySortPlan(plan, statusClass) {
+  addStep("Applying tab moves and groups.");
+  const applied = await chrome.runtime.sendMessage({
+    type: "APPLY_SORT_PLAN",
+    payload: { plan }
+  });
+
+  if (!applied.ok) throw new Error(applied.error);
+
+  const suffix = applied.warnings?.length ? ` ${applied.warnings.join(" ")}` : "";
+  setStatus(`${applied.message}${suffix}`, statusClass);
+}
+
+function describePreparedInput(prepared) {
+  const tabs = prepared.tabs || [];
+  const snippetCount = tabs.filter((tab) => tab.snippet).length;
+  const historyCount = tabs.filter((tab) => tab.history).length;
+  addStep(`Prepared ${tabs.length} movable tab${tabs.length === 1 ? "" : "s"}.`);
+  if (snippetCount) addStep(`Included page snippets for ${snippetCount} tab${snippetCount === 1 ? "" : "s"}.`);
+  if (historyCount) addStep(`Included history signal for ${historyCount} tab${historyCount === 1 ? "" : "s"}.`);
+  for (const warning of prepared.warnings || []) {
+    addStep(`Warning: ${warning}`);
+  }
+}
+
+function announceAiPhase(provider, phase) {
+  if (phase === "agentic-discovery") {
+    setStatus(`${provider} is drafting workflow groups...`, "");
+    addStep("AI phase 1: infer workflows and candidate groups.");
+  } else if (phase === "agentic-finalize") {
+    setStatus(`${provider} is refining groups...`, "");
+    addStep("AI phase 2: normalize groups, sequence tabs, and check coverage.");
+  } else {
+    setStatus(`${provider} is sorting tabs...`, "");
+    addStep("AI phase: infer groups and order.");
+  }
+}
+
+function addValidationStep(validation) {
+  if (validation.ok) {
+    addStep(`Validated AI plan with ${validation.plan.groups.length} group${validation.plan.groups.length === 1 ? "" : "s"}.`);
+  } else {
+    addStep(`AI plan failed validation: ${validation.reason || "unknown reason"}.`);
+    addStep("Fallback: using deterministic title/domain sort.");
+  }
+}
+
+function describePlan(plan) {
+  const names = plan.groups.map((group) => `${group.name} (${group.tabIds.length})`).join(", ");
+  addStep(`Final plan: ${names || "no groups"}.`);
+}
+
+function addStep(message, className = "") {
+  const steps = [...activityLog.querySelectorAll(".activity-step")].map((item) => ({
+    message: item.textContent,
+    state: item.classList.contains("is-complete") ? "complete" : "active",
+    className: item.classList.contains("error") ? "error" : ""
+  }));
+  const last = steps.at(-1);
+  if (last && last.state === "active") last.state = "complete";
+  steps.push({ message, state: "active", className });
+  renderSteps(steps);
 }
 
 async function undoSort() {
-  setStatus("Restoring last sort...", "");
-  addActivity("Undo requested. Restoring the last pre-sort snapshot.");
+  sortButton.disabled = true;
   undoButton.disabled = true;
+  setStatus("Restoring last sort...", "");
+  renderSteps([{ message: "Restoring the last pre-sort snapshot.", state: "active" }]);
 
   try {
     const response = await chrome.runtime.sendMessage({ type: "UNDO_LAST_SORT" });
@@ -133,154 +233,60 @@ async function undoSort() {
 
     const suffix = response.warnings?.length ? ` ${response.warnings.join(" ")}` : "";
     setStatus(`${response.message}${suffix}`, "success");
-    await refreshTabCount();
+    renderSteps([{ message: "Restore complete.", state: "complete" }]);
   } catch (error) {
     setStatus(error.message || String(error), "error");
+    renderSteps([{ message: error.message || String(error), className: "error", state: "active" }]);
   } finally {
+    sortButton.disabled = false;
     undoButton.disabled = false;
   }
 }
 
-async function sortWithChromeBuiltIn(settings) {
-  addActivity("Preparing tab context in the background worker.");
-  setStatus("Preparing current-window tabs...", "");
-  const prepared = await chrome.runtime.sendMessage({
-    type: "PREPARE_SORT_INPUT",
-    payload: {
-      mode: mode.value,
-      contextMode: contextMode.value,
-      maxSnippetLength: settings.maxSnippetLength
-    }
-  });
-
-  if (!prepared.ok) throw new Error(prepared.error);
-  if (!prepared.tabs.length) {
-    setStatus("No movable tabs found in this window.", "success");
+async function restoreStatus() {
+  const response = await chrome.runtime.sendMessage({ type: "GET_SORT_STATUS" });
+  if (!response.ok) {
+    setStatus(response.error || "Could not load status.", "error");
     return;
   }
-  describePreparedInput(prepared);
-
-  let plan = titleSortPlan(prepared.tabs);
-  const fallbackWarnings = [];
-
-  try {
-    addActivity("Creating local Chrome Built-in AI session.");
-    setStatus("Starting Chrome Built-in AI. A first-time model download may be required...", "");
-    await withChromeBuiltInSession(
-      async (session) => {
-        const validation = await aiSortPlan(prepared.tabs, mode.value, async (prompt, meta) => {
-          announceAiPhase("Chrome Built-in AI", meta.phase);
-          return promptChromeBuiltIn(session, prompt);
-        });
-        addValidationActivity(validation);
-        plan = planOrFallback(validation, prepared.tabs);
-      },
-      {
-        onDownloadProgress(progress) {
-          setStatus(`Downloading Chrome Built-in AI model... ${Math.round(progress * 100)}%`, "");
-        }
-      }
-    );
-  } catch (error) {
-    addActivity("Chrome Built-in AI failed; falling back to title/domain sort.");
-    fallbackWarnings.push(
-      `${error.message || String(error)} Used title sort instead. If Chrome reports missing user activation, click Sort again.`
-    );
-  }
-
-  plan.warnings.push(...prepared.warnings, ...fallbackWarnings);
-  describePlan(plan);
-  addActivity("Applying tab moves and groups.");
-  const applied = await chrome.runtime.sendMessage({
-    type: "APPLY_SORT_PLAN",
-    payload: { plan }
-  });
-
-  if (!applied.ok) throw new Error(applied.error);
-
-  const suffix = applied.warnings?.length ? ` ${applied.warnings.join(" ")}` : "";
-  setStatus(`${applied.message}${suffix}`, fallbackWarnings.length ? "" : "success");
-  await refreshTabCount();
+  renderSortStatus(response.status);
 }
 
-async function sortWithCloudAi(settings) {
-  addActivity("Preparing tab context in the background worker.");
-  setStatus("Preparing current-window tabs...", "");
-  const prepared = await chrome.runtime.sendMessage({
-    type: "PREPARE_SORT_INPUT",
-    payload: {
-      mode: mode.value,
-      contextMode: contextMode.value,
-      maxSnippetLength: settings.maxSnippetLength
-    }
-  });
-
-  if (!prepared.ok) throw new Error(prepared.error);
-  if (!prepared.tabs.length) {
-    setStatus("No movable tabs found in this window.", "success");
+async function clearActivity() {
+  const response = await chrome.runtime.sendMessage({ type: "CLEAR_SORT_STATUS" });
+  if (response.ok) {
+    renderSortStatus(response.status);
     return;
   }
-
-  describePreparedInput(prepared);
-  addActivity("Sending structured sort request to the selected AI provider.");
-  const validation = await aiSortPlan(prepared.tabs, mode.value, async (prompt, meta) => {
-    announceAiPhase(providerLabel(settings.provider), meta.phase);
-    return callAiProvider(settings, prompt);
-  });
-  addValidationActivity(validation);
-
-  const plan = planOrFallback(validation, prepared.tabs);
-  plan.warnings.push(...prepared.warnings);
-  describePlan(plan);
-
-  addActivity("Applying tab moves and groups.");
-  const applied = await chrome.runtime.sendMessage({
-    type: "APPLY_SORT_PLAN",
-    payload: { plan }
-  });
-
-  if (!applied.ok) throw new Error(applied.error);
-
-  const suffix = applied.warnings?.length ? ` ${applied.warnings.join(" ")}` : "";
-  setStatus(`${applied.message}${suffix}`, validation.ok ? "success" : "");
-  await refreshTabCount();
+  activityLog.replaceChildren();
 }
 
-function describePreparedInput(prepared) {
-  const tabs = prepared.tabs || [];
-  const snippetCount = tabs.filter((tab) => tab.snippet).length;
-  const historyCount = tabs.filter((tab) => tab.history).length;
-  addActivity(`Prepared ${tabs.length} movable tab${tabs.length === 1 ? "" : "s"}.`);
-  if (snippetCount) addActivity(`Included page snippets for ${snippetCount} tab${snippetCount === 1 ? "" : "s"}.`);
-  if (historyCount) addActivity(`Included trace/history context for ${historyCount} tab${historyCount === 1 ? "" : "s"}.`);
-  for (const warning of prepared.warnings || []) {
-    addActivity(`Context warning: ${warning}`);
+function handleStorageChange(changes, areaName) {
+  if (areaName !== "local" || !changes[SORT_STATUS_KEY]) return;
+  renderSortStatus(changes[SORT_STATUS_KEY].newValue);
+}
+
+function renderSortStatus(sortStatus) {
+  const current = sortStatus || {};
+  setStatus(current.message || "", current.className || "");
+  renderSteps(current.steps || []);
+  sortButton.disabled = Boolean(current.running);
+}
+
+function renderSteps(steps) {
+  activityLog.replaceChildren();
+  for (const step of steps) {
+    const item = document.createElement("li");
+    const text = document.createElement("span");
+    text.textContent = step.message;
+    item.className = `activity-step ${step.state === "complete" ? "is-complete" : "is-active"} ${step.className || ""}`.trim();
+    item.append(text);
+    activityLog.append(item);
   }
+  activityLog.scrollTop = activityLog.scrollHeight;
 }
 
-function announceAiPhase(provider, phase) {
-  if (phase === "agentic-discovery") {
-    setStatus(`${provider} is drafting workflow groups...`, "");
-    addActivity("AI phase 1: infer workflows and candidate groups from tab context.");
-  } else if (phase === "agentic-finalize") {
-    setStatus(`${provider} is refining groups...`, "");
-    addActivity("AI phase 2: normalize groups, sequence tabs, and check coverage.");
-  } else {
-    setStatus(`${provider} is sorting tabs...`, "");
-    addActivity("AI phase: infer groups and order from the prepared context.");
-  }
-}
-
-function addValidationActivity(validation) {
-  if (validation.ok) {
-    addActivity(`Validated AI plan with ${validation.plan.groups.length} group${validation.plan.groups.length === 1 ? "" : "s"}.`);
-  } else {
-    addActivity(`AI plan failed validation: ${validation.reason || "unknown reason"}.`);
-    addActivity("Fallback: using deterministic title/domain sort.");
-  }
-}
-
-function describePlan(plan) {
-  const names = plan.groups.map((group) => `${group.name} (${group.tabIds.length})`).join(", ");
-  addActivity(`Final plan: ${names || "no groups"}.`);
+function setStatus(message, className) {
+  status.textContent = message;
+  status.className = `status ${className}`.trim();
 }
